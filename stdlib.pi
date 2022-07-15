@@ -1,0 +1,293 @@
+// stdlib.pi
+// a standard library implementation.
+// gabriel campbell.
+// created 2021-12-08.
+
+fn putc(u8 c) {
+	asm("LDB R11 R12");
+	asm("CLR R11");
+}
+
+fn print(u8* str) {
+	i32 i = -1;
+	while(str[i=i+1] != '\0')
+		putc(str[i]);
+}
+
+fn u64 upow(u64 x, u64 y) {
+	u64 res = 1;
+	while(y) {
+		res = res * x;
+		y = y - 1;
+	}
+	ret res;
+}
+
+// prints an unsigned int
+fn printu(u64 x) {
+	// 1st step: measure digit width of x (max # digits is 20)
+	u64 max_n = 20;
+	u64 place = 1, i = 0;
+	u64 high = 0;
+	while(max_n) {
+		if(x/place != 0) high = i;
+		place = place * 10;
+		i = i + 1;
+		max_n = max_n - 1;
+	}
+	u32 length = high+1;
+	place = upow(10,length-1);
+
+	// 2nd step: start at the top digit, work way down
+	while(length) {
+		u8 c = '0' + x/place;
+		putc(c);
+		x = x - (x/place)*place;
+		place = place/10;
+		length = length - 1;
+	}
+}
+
+fn printi(i64 x) {
+	if(x < 0) {
+		putc('-');
+		x = -x;
+	}
+	printu(x);
+}
+
+fn u8* alloc(u64 size) {
+	if(!size) ret 0;
+	ret __syscall(1,size);
+}
+
+fn u8* realloc(u8* ptr, u64 old_size, u64 new_size) {
+	if(!ptr || !new_size || !old_size) ret 0;
+	u8* new = alloc(new_size);
+	if(!new) ret 0;
+	memcpy(new, ptr, old_size);
+	free(ptr);
+	ret new;
+}
+
+fn u8* zalloc(u64 size) {
+	u8* p = alloc(size);
+	if(p)
+		while(size) {
+			p[size-1] = 0;
+			size = size-1;
+		}
+	ret p;
+}
+
+fn free(u64 address) {
+	__syscall(2,address);
+}
+
+fn nsleep(u64 ns) {
+	if(ns >= 0x8000000000000000)
+		ns = 0x7FFFFFFFFFFFFFFF; // MSB is used internally by kernel
+	__syscall(3,ns);
+}
+
+fn sleep(u64 ms) {
+	nsleep(ms*1000000);
+} 
+
+fn memcpy(u8* dest, u8* src, u32 n) {
+	while(n) {
+		dest[n-1] = src[n-1];
+		n = n-1;
+	}
+}
+
+fn memset(u8* dest, u8 c, u32 n) {
+	while(n) {
+		dest[n-1] = c;
+		n = n-1;
+	}
+}
+
+fn u32 strlen(u8* str) {
+	i32 i = -1;
+	while(str[i=i+1] != '\0');
+	ret i;
+}
+
+fn u8 lower(u8 c) {
+	if(c < 65 || c > 90) ret c;
+	ret c + 32;
+}
+
+fn u8 upper(u8 c) {
+	if(c < 97 || c > 122) ret c;
+	ret c - 32;
+}
+
+fn u8* hw_address {
+	u8* x;
+	asm("3{x}");
+	asm("GETHWI R2");
+	asm("STRD R2 R3");
+	ret x;
+}
+
+fn u64 __syscall(u8 id, u64 parameter) {
+	u8* syscall_byte = 0;
+	u64* syscall_data = 0;
+	asm(
+	"MOV R0 9			\n"
+	"1{syscall_byte}	\n"
+	"STRD R0 R1			\n"
+	"MOV R0 10			\n"
+	"1{syscall_data}	\n"
+	"STRD R0 R1			");
+
+	*syscall_data = parameter;
+	*syscall_byte = id;
+
+	if(id == 3) {
+		parameter;
+		asm("SLEEP R2");
+	}
+
+	while(*syscall_byte);
+
+	ret *syscall_data;
+}
+
+fn u16 fopen(u8* path) {
+	u16 id = 0;
+	asm(
+	"0{path}			\n"
+	"LDD R0 R0			\n"
+	"CLR R1				\n"
+	"FCTL R0 R0 R1		\n"
+	"0{id}				\n"
+	"STRH R1 R0			");
+	ret id;
+}
+
+fn fwrite(u16 file, u64 offset, u8* data, u64 n) {
+	if(!n) ret;
+	n = n-1;
+	asm(
+	"0{file}			\n"
+	"LDH R0 R0			\n"
+	"FSET R0			\n"
+	"0{data}			\n"
+	"LDD R0 R0			\n"
+	"1{offset}			\n"
+	"LDD R1 R1			\n"
+	"2{n}				\n"
+	"LDD R2 R2			\n"
+	"FWRITE R0 R1 R2	");
+}
+
+fn fread(u16 file, u64 offset, u8* data, u64 n) {
+	if(!n) ret;
+	n = n-1;
+	asm(
+	"0{file}			\n"
+	"LDH R0 R0			\n"
+	"FSET R0			\n"
+	"0{data}			\n"
+	"LDD R0 R0			\n"
+	"1{offset}			\n"
+	"LDD R1 R1			\n"
+	"2{n}				\n"
+	"LDD R2 R2			\n"
+	"FREAD R0 R1 R2		");
+}
+
+fn u64 fsize(u16 id) {
+	u64 size;
+	asm(
+	"0{id}				\n"
+	"LDH R0 R0			\n"
+	"FSET R0			\n"
+	"CLR R0				\n"
+	"FSIZE R0 R0		\n"
+	"1{size}			\n"
+	"STRD R0 R1			");
+	ret size;
+}
+
+fn fresize(u16 id, u64 n) {
+	if(!n) ret;
+	asm(
+	"0{id}				\n"
+	"LDH R0 R0			\n"
+	"FSET R0			\n"
+	"0{n}				\n"
+	"LDD R0 R0			\n"
+	"FSIZE R0 R0		");
+}
+
+fn fclose(u16 id) {
+	if(!id) ret;
+	asm("0{id}");
+	asm("LDH R0 R0");
+	asm("FCLOSE R0");
+}
+
+fn f64 tan(f64 x) {
+	f64 res;
+	asm(
+	"CLR R0				\n"
+	"1{x}				\n"
+	"LDD R1 R1			\n"
+	"MATHF R0 R1 R2		\n"
+	"0{res}				\n"
+	"STRD R2 R0			");
+	ret res;
+}
+
+fn f64 sin(f64 x) {
+	f64 res;
+	asm(
+	"MOV R0 1			\n"
+	"1{x}				\n"
+	"LDD R1 R1			\n"
+	"MATHF R0 R1 R2		\n"
+	"0{res}				\n"
+	"STRD R2 R0			");
+	ret res;
+}
+
+fn f64 cos(f64 x) {
+	f64 res;
+	asm(
+	"MOV R0 2			\n"
+	"1{x}				\n"
+	"LDD R1 R1			\n"
+	"MATHF R0 R1 R2		\n"
+	"0{res}				\n"
+	"STRD R2 R0			");
+	ret res;
+}
+
+fn f64 sqrt(f64 x) {
+	f64 res;
+	asm(
+	"0{x}				\n"
+	"LDD R0 R0			\n"
+	"MOV R1 .5d			\n"
+	"DPOW R0 R1 R2		\n"
+	"0{res}				\n"
+	"STRD R2 R0			");
+	ret res;
+}
+
+fn f64 pow(f64 x, f64 y) {
+	f64 res;
+	asm(
+	"0{x}				\n"
+	"LDD R0 R0			\n"
+	"1{y}				\n"
+	"LDD R1 R1			\n"
+	"DPOW R0 R1 R2		\n"
+	"0{res}				\n"
+	"STRD R2 R0			");
+	ret res;
+}
